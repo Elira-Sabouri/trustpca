@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+
 from scipy.stats import chi2
 from matplotlib.patches import Ellipse
 import plotly.express as px
@@ -14,7 +15,6 @@ def make_legend_ellipse(legend, orig_handle,
                         width, height, fontsize):
     p = mpatches.Ellipse(xy=(0.5*width-0.5*xdescent, 0.5*height-0.5*ydescent),
                          width = width+xdescent, height=(height+ydescent))
-
     return p
 
 def get_ellipse(mean, Sigma, confidence_level, color):
@@ -38,7 +38,7 @@ def get_ellipse(mean, Sigma, confidence_level, color):
 
 outfile = 'paper_figures/figure_S04.pdf'
 
-covs = np.load('data/uncertainty_prediction/results/ancient_corrected_stats.npy')
+covs = np.load('data/uncertainty_prediction/results/ancient_uncorrected_stats.npy')
 
 results = pd.read_csv('data/uncertainty_prediction/results/ancient_samples.csv', sep=',', header=0, index_col=0, converters={'in ellipse frequencies': pd.eval})
 
@@ -48,6 +48,7 @@ rates_p = [20, 50, 75, 90, 95, 99]
 confs = [0.25, 0.50, 0.75, 0.95]
 palette = px.colors.qualitative.Vivid + px.colors.qualitative.Vivid
 palette = [px.colors.unconvert_from_RGB_255(px.colors.unlabel_rgb(c)) for c in palette]
+
 
 pixel = 1/plt.rcParams['figure.dpi']
 c1 = mpatches.Circle((0, 0), 1, fc='None', lw=1, edgecolor=palette[6])

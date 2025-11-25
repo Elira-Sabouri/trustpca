@@ -1,111 +1,79 @@
-import os
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats import chi2
+from matplotlib.patches import Ellipse
 import plotly.express as px
 import pandas as pd
 from tueplots import axes, bundles
+import matplotlib.patches as mpatches
 
-def read_coordinates(file_path, rate=1):
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-        coordinates = [list(map(float, line.strip().split())) for idx, line in enumerate(lines) if idx % rate == 0]
-    return coordinates
+from matplotlib.legend_handler import HandlerPatch
 
-def flatten_comprehension(matrix):
-  return [item for row in matrix for item in row]
+def make_legend_ellipse(legend, orig_handle,
+                        xdescent, ydescent,
+                        width, height, fontsize):
+    p = mpatches.Ellipse(xy=(0.5*width-0.5*xdescent, 0.5*height-0.5*ydescent),
+                         width = width+xdescent, height=(height+ydescent))
 
-colors = {
-        '99taus.txt': 'orange',
-        '95taus.txt': 'purple',
-        '90taus.txt': 'red',
-        '75taus.txt': 'green',
-        '50taus.txt': 'blue',
-        '20taus.txt': 'gold',
-        'original_tau.txt': 'black'
-    }
+    return p
 
+def get_ellipse(mean, Sigma, confidence_level, color):
+  chi2_val = chi2.ppf(confidence_level, df=2)
+  eigvals, eigvecs = np.linalg.eigh(Sigma)
 
-collected_dirs = []
-collected_taus = []
-originals = []
-names_map = {
-    '99taus.txt': '99 %',
-    '95taus.txt': '95 %',
-    '90taus.txt': '90 %',
-    '75taus.txt': '75 %',
-    '50taus.txt': '50 %',
-    '20taus.txt': '20 %',
-}
+  # Sorting eigenvalues and corresponding eigenvectors
+  order = eigvals.argsort()[::-1]
+  eigvals = eigvals[order]
+  eigvecs = eigvecs[:, order]
 
-samples_dict = {
-    '99 %': [],
-    '95 %': [],
-    '90 %': [],
-    '75 %': [],
-    '50 %': [],
-    '20 %': [],
-}
+  # Width and height of the ellipse (2 * sqrt(eigenvalue * chi-square value))
+  width = 2 * np.sqrt(eigvals[0] * chi2_val)
+  height = 2 * np.sqrt(eigvals[1] * chi2_val)
 
-for root, dirs, files in os.walk("data/downsampling/results"):
-  for dir in dirs:
-    if dir in ['Altai_Neanderthal.DG', 'Denisova.DG']:
-      print(dir)
-      folder_path = os.path.join(root, dir)
-      collected_dirs.append(dir)
-      for j, file in enumerate(colors.keys()):
-        file_path = os.path.join(folder_path, file)
-        if os.path.exists(file_path):
-          if file == 'original_tau.txt':
-             originals.append(read_coordinates(file_path))
-          else:
-            collected_taus.append(file)
-            coordinates = np.array(read_coordinates(file_path))
-            samples_dict[names_map[file]].append(coordinates)
+  # Angle of the ellipse in degrees (in the direction of the largest eigenvector)
+  angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+
+  ellipse = Ellipse(xy=mean, width=width, height=height, angle=angle, fc='None', lw=1, edgecolor=color, label='confidence ellipse (0.95)')
+  return height/2, ellipse
 
 outfile = 'paper_figures/figure_S05.pdf'
 
-originals = np.squeeze(np.array(originals), axis=1)
-print(originals)
+covs = np.load('data/uncertainty_prediction/results/ancient_corrected_stats.npy')
 
-PC1 = []
-PC2 = []
-samples = []
-rates = []
+results = pd.read_csv('data/uncertainty_prediction/results/ancient_samples.csv', sep=',', header=0, index_col=0, converters={'in ellipse frequencies': pd.eval})
 
-for key in ['20 %', '50 %', '75 %', '90 %', '95 %', '99 %']:
-  samples.extend(flatten_comprehension([np.repeat(i, 20000) for i in range(2)]))
-  PC1.extend(np.vstack(samples_dict[key])[:, 0])
-  PC2.extend(np.vstack(samples_dict[key])[:, 1])
-  rates.extend(flatten_comprehension([np.repeat(key, 20000) for i in range(2)]))
+rates = [0.2, 0.5, 0.75, 0.9, 0.95, 0.99]
+rates_p = [20, 50, 75, 90, 95, 99]
 
-print(len(samples), len(PC1), len(PC2), len(rates))
-
-samples = pd.DataFrame({'PC1': PC1, 
-                        'PC2': PC2,
-                        'ancients': [str(i+1) for i in samples],
-                        'r': rates})
-
-modern_df = pd.read_csv('data/embedding_modern_refs.csv')
-rates = [20, 50, 75, 90, 95, 99]
-rates_p = ['20 %', '50 %', '75 %', '90 %', '95 %', '99 %']
+confs = [0.25, 0.50, 0.75, 0.95]
 palette = px.colors.qualitative.Vivid + px.colors.qualitative.Vivid
 palette = [px.colors.unconvert_from_RGB_255(px.colors.unlabel_rgb(c)) for c in palette]
 
-px = 1/plt.rcParams['figure.dpi']
+pixel = 1/plt.rcParams['figure.dpi']
+c1 = mpatches.Circle((0, 0), 1, fc='None', lw=1, edgecolor=palette[6])
+c2 = mpatches.Circle((0, 0), 1, fc='None', lw=1, edgecolor=palette[7])
 
-labels = ['Neanderthal', 'Denisovan']
 with plt.rc_context({**bundles.aistats2022(family="serif"), **axes.lines()}):
-  fig, axes = plt.subplots(2, 3, figsize=(488*px, 0.75*488*px), sharex=True, sharey=True)
+  fig, axes = plt.subplots(2, 3, figsize=(488*pixel, 0.85*488*pixel))
   for j, ax in enumerate(axes.ravel()):
-    ax.scatter(modern_df['PC1'], modern_df['PC2'], alpha=0.2, s=1, c='grey')
-    ax.set_title(rf'$r={{{rates[j]}}}\,\%$')
-    samples_sub = samples.loc[samples['r']==rates_p[j]]
-    for i in range(1, 3):
-      samples_ancient = samples_sub.loc[samples_sub['ancients']==str(i)]
-      ax.scatter(samples_ancient['PC1'], samples_ancient['PC2'], alpha=0.8, s=2, c=palette[i+5], label=labels[i-1], rasterized=True)
-    ax.scatter(*originals.T, s=1, c='black')  
-  plt.setp(axes[-1, :], xlabel='PC 1')
-  plt.setp(axes[:, 0], ylabel='PC 2')  
-  handles, labels = ax.get_legend_handles_labels()
-  fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5), title=r'$\hat{\tau}^{(i, j)}$ for $i=$')
-  plt.savefig(outfile, dpi=150)
+    results_sub = results.loc[results['missing rate']==rates[j]]
+    pc1 = results_sub['discr 1'].values
+    pc2 = results_sub['discr 2'].values
+    pcs = np.array([pc1, pc2])
+    true_cov = np.cov(pcs)
+    true_mean = np.mean(pcs, axis=1)
+
+    ax.set_title(rf'$r={{{rates_p[j]}}}\,\%$')
+    ax.scatter(pc1, pc2, c=palette[7], s=1, alpha=0.3)
+    ax.scatter(0, 0, c=palette[6], s=1)
+    for conf in confs: 
+      h, e = get_ellipse(true_mean, true_cov, conf, palette[7])
+      ax.add_patch(e)
+      _, e = get_ellipse([0, 0], covs[j], conf, palette[6])
+      ax.add_patch(e)
+
+  fig.supxlabel(r'$\tau_1 - \hat{\tau}_1$')
+  fig.supylabel(r'$\tau_2 - \hat{\tau}_2$')
+  fig.legend([c1, c2], [r'pred.', r'true'], handler_map={mpatches.Circle:HandlerPatch(patch_func=make_legend_ellipse),
+                        }, loc='center left', bbox_to_anchor=(1, 0.5), title=r'Contours')
+  plt.savefig(outfile)

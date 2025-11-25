@@ -1,89 +1,177 @@
+import os
 import matplotlib.pyplot as plt
 import numpy as np
-
 import plotly.express as px
 import pandas as pd
 from tueplots import axes, bundles
-from matplotlib.patches import Patch
-import matplotlib.text as mtext
 
-palette = px.colors.qualitative.Vivid + px.colors.qualitative.Vivid
+def read_coordinates(file_path, rate=1):
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+        coordinates = [list(map(float, line.strip().split())) for idx, line in enumerate(lines) if idx % rate == 0]
+    return coordinates
 
-def kl_divergence(m0, m1, C0, C1):
-   '''
-   N0(m0, C0): true distribution
-   N1(m1, C1): predicted distribution
-   returns KL(N0||N1)'''
-   C1_inv = np.linalg.inv(C1)
-   return 0.5 * (np.trace(C1_inv @ C0) - 2 + (m1 - m0).T @ C1_inv @ (m1 - m0) + np.log(np.linalg.det(C1)/np.linalg.det(C0)))
+def flatten_comprehension(matrix):
+  return [item for row in matrix for item in row]
 
-class LegendTitle(object):
-    def __init__(self, text_props=None):
-        self.text_props = text_props or {}
-        super(LegendTitle, self).__init__()
+colors = {
+        '99taus.txt': 'orange',
+        '95taus.txt': 'purple',
+        '90taus.txt': 'red',
+        '75taus.txt': 'green',
+        '50taus.txt': 'blue',
+        '20taus.txt': 'gold',
+        'original_tau.txt': 'black'
+    }
 
-    def legend_artist(self, legend, orig_handle, fontsize, handlebox):
-        x0, y0 = handlebox.xdescent, handlebox.ydescent
-        title = mtext.Text(x0, y0, r'\underline{' + orig_handle + '}', usetex=True, **self.text_props)
-        handlebox.add_artist(title)
-        return title
-    
+
+collected_dirs = []
+collected_taus = []
+originals = []
+names_map = {
+    '99.5taus.txt': '99.5 %',
+    '99taus.txt': '99 %',
+    '98taus.txt': '98 %',
+    '97taus.txt': '97 %',
+    '96taus.txt': '96 %',
+    '95taus.txt': '95 %',
+    '94taus.txt': '94 %',
+    '93taus.txt': '93 %',
+    '92taus.txt': '92 %',
+    '90taus.txt': '90 %',
+    '75taus.txt': '75 %',
+    '50taus.txt': '50 %',
+    '20taus.txt': '20 %',
+    'original_tau.txt': '0 %'
+}
+
+samples_dict = {
+    '99.5 %': [],
+    '99 %': [],
+    '98 %': [],
+    '97 %': [],
+    '96 %': [],
+    '95 %': [],
+    '94 %': [],
+    '93 %': [],
+    '92 %': [],
+    '90 %': [],
+    '75 %': [],
+    '50 %': [],
+    '20 %': [],
+}
+
+for root, dirs, files in os.walk("/data/downsampling/results"):
+  for dir in dirs:
+    if dir not in ['Altai_Neanderthal.DG', 'Denisova.DG']:
+      print(dir)
+      folder_path = os.path.join(root, dir)
+      collected_dirs.append(dir)
+      for j, file in enumerate(names_map.keys()):
+        file_path = os.path.join(folder_path, file)
+        if os.path.exists(file_path):
+          if file == 'original_tau.txt':
+             originals.append(read_coordinates(file_path))
+          else:
+            collected_taus.append(file)
+            coordinates = np.array(read_coordinates(file_path))
+            print('file', file)
+            samples_dict[names_map[file]].append(coordinates)
+
 outfile = 'paper_figures/figure_S02.pdf'
 
-covs_modern = np.load('data/uncertainty_prediction/results/modern_stats_for_quantification.npy')
-covs_uncorrected = np.load('data/uncertainty_prediction/results/ancient_uncorrected_stats_for_quantification.npy')
-covs_corrected = np.load('data/uncertainty_prediction/results/ancient_corrected_stats_for_quantification.npy')
+originals = np.squeeze(np.array(originals), axis=1)
+print(originals)
 
-results_modern = pd.read_csv('data/uncertainty_prediction/results/modern_samples_for_quantification.csv', sep=',', header=0, index_col=0, converters={'in ellipse frequencies': pd.eval})
-results_ancient = pd.read_csv('data/uncertainty_prediction/results/ancient_samples_for_quantification.csv', sep=',', header=0, index_col=0, converters={'in ellipse frequencies': pd.eval})
+PC1 = []
+PC2 = []
+samples = []
+rates = []
 
-rates = [0.2, 0.5, 0.75, 0.9, 0.95, 0.99]
-rates_p = [20, 50, 75, 90, 95, 99]
+for key in ['20 %', '50 %', '75 %', '90 %', '92 %', '93 %', '94 %', '95 %','96 %','97 %','98 %', '99 %', '99.5 %']:
+  print(key)
+  samples.extend(flatten_comprehension([np.repeat(i, 20000) for i in range(15)]))
+  PC1.extend(np.vstack(samples_dict[key])[:, 0])
+  PC2.extend(np.vstack(samples_dict[key])[:, 1])
+  rates.extend(flatten_comprehension([np.repeat(key, 20000) for i in range(15)]))
 
-def compute_kl_divergences(rates, results, covs):
-  kl_per_rate_mean = []
-  kl_per_rate_std = []
-  for j, rate in enumerate(rates):
-    results_m = results.loc[results['missing rate']==rates[j]]
-    kl_per_sample = []
-    for i in range(100):
-      results_sub = results_m.loc[results['simulation sample']==i]
-      pc1 = results_sub['discr 1'].values
-      pc2 = results_sub['discr 2'].values
-      pcs = np.array([pc1, pc2])
-      true_cov = np.cov(pcs)
-      #print('true', true_cov)
-      pred_cov = covs[j*100+i]
-      true_mean = np.mean(pcs, axis=1)
-      pred_mean = np.array([0, 0])
-      kl_div = kl_divergence(true_mean, pred_mean, true_cov, pred_cov)
-      kl_per_sample.append(kl_div)
-    kl_per_rate_mean.append(np.mean(kl_per_sample))
-    kl_per_rate_std.append(np.std(kl_per_sample))
-  return(kl_per_rate_mean, kl_per_rate_std)
+print(len(samples), len(PC1), len(PC2), len(rates))
 
+samples = pd.DataFrame({'PC1': PC1, 
+                        'PC2': PC2,
+                        'ancients': [str(i+1) for i in samples],
+                        'r': rates})
+
+ref_pc1 = [originals[int(i)-1, 0] for i in samples['ancients']]
+ref_pc2 = [originals[int(i)-1, 1] for i in samples['ancients']]
+
+samples["id"] = samples.index
+samples['discrepancyPC1'] = ref_pc1 - samples['PC1']
+samples['discrepancyPC2'] = ref_pc2 - samples['PC2']
 
 palette = px.colors.qualitative.Vivid + px.colors.qualitative.Vivid
 palette = [px.colors.unconvert_from_RGB_255(px.colors.unlabel_rgb(c)) for c in palette]
 
-pixel = 1/plt.rcParams['figure.dpi']
+# Now we group by 'r' and create separate violins for each group
+r_values = sorted(samples['r'].unique())  # Get unique values of 'r'
+
+modern_df = pd.read_csv('data/embedding_modern_refs.csv')
+
+px = 1/plt.rcParams['figure.dpi']
 
 with plt.rc_context({**bundles.aistats2022(family="serif"), **axes.lines()}):
-  plt.rcParams.update({
-    'text.latex.preamble': r'\usepackage{amsmath}'
-  })
-  fig, ax = plt.subplots(1, 1, figsize=(488*pixel, 0.68*488*pixel))
-  kl_per_rate_mean, kl_per_rate_std = compute_kl_divergences(rates, results_modern, covs_modern)
-  ax.scatter(rates, kl_per_rate_mean, label='Modern', c=palette[6], s=10)
-  ax.errorbar(x=rates,y=kl_per_rate_mean, yerr=kl_per_rate_std, fmt='none', capsize=3, c=palette[6])
-  kl_per_rate_mean, kl_per_rate_std = compute_kl_divergences(rates, results_ancient, covs_uncorrected)
-  ax.scatter(rates, kl_per_rate_mean, label='Ancient no corr.', c=palette[7], s=10)
-  ax.errorbar(x=rates,y=kl_per_rate_mean, yerr=kl_per_rate_std, fmt='none', capsize=3, c=palette[7])
-  kl_per_rate_mean, kl_per_rate_std = compute_kl_divergences(rates, results_ancient, covs_corrected)
-  ax.scatter(rates, kl_per_rate_mean, label='Ancient with corr.', c=palette[7], s=10, marker='s')
-  ax.errorbar(x=rates,y=kl_per_rate_mean, yerr=kl_per_rate_std, fmt='none', capsize=3, c=palette[7])
-  ax.set_xlabel(r'$r$')
-  ax.set_ylabel(r'$D_\text{KL}(\mathcal{N}_\text{empir.}||\mathcal{N}_\text{pred.})$')
-  plt.legend(['Used data', (Patch(color=palette[6])), (Patch(color=palette[7])), 'Correction', (plt.Line2D([], [], linestyle='', marker='.', color='black')), (plt.Line2D([], [], linestyle='', marker='s', markersize=3, color='black'))], ['', 'Modern', 'Ancient', '', 'False', 'True'],
-           handler_map={str: LegendTitle({'fontsize': 8})})
-  fig.savefig('paper_figures/figure_S02.pdf')
+  # Create figure and axes
+  fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(488*px, 0.5*488*px))
+
+  # Define positions for each violin group, spaced apart
+  positions = np.arange(1, len(r_values) + 1)  # X-positions for violins
+  flierprops = dict(marker='.', markersize=2,
+                  )
+  boxprops = dict(linewidth=1)
+  medianprops = dict(linewidth=1)
+  ax1.axvline(0, color='grey', linewidth=0.1)
+  # Plot the violins for each 'r' value
+  for idx, r_val in enumerate(r_values):
+    # Subset the data for the current 'r'
+    data_PC1 = samples.loc[samples['r'] == r_val, 'discrepancyPC1']
+    parts_A = ax1.violinplot(data_PC1, vert=False, positions=[positions[idx]], showmeans=False, showmedians=False, showextrema=False, widths=0.4)
+    # Customize appearance (colors, transparency, edge color)
+    for pc in parts_A['bodies']:
+      pc.set_facecolor(palette[6])  # Blue for PC1
+      pc.set_edgecolor('black')
+      pc.set_alpha(1)
+  ax1.set_xlabel(r'$\tau_1^{(i)} - \hat{\tau}_1^{(i, j)}$')
+  ax1_twin = ax1.twinx()
+
+  ax1_twin.scatter(modern_df['PC1'], modern_df['PC2'], alpha=0.1, s=1, c='grey')
+  ax1_twin.axes.get_xaxis().set_visible(False)
+  ax1_twin.axes.get_yaxis().set_visible(False)
+
+  rates = [20, 50, 75, 90, 92, 93, 94, 95, 96, 97, 98, 99, 99.5]
+  # Customize plot aesthetics
+  ax1.set_yticks(positions)
+  ax1.set_yticklabels([rf'${{{rate}}}$' for rate in rates])
+  ax1.set_ylabel(r'$r$ in $\%$')
+
+  ax2.axhline(0, color='grey', linewidth=0.1)
+  for idx, r_val in enumerate(r_values):
+    # Subset the data for the current 'r'
+    data_PC2 = samples.loc[samples['r'] == r_val, 'discrepancyPC2']
+    parts_B = ax2.violinplot(data_PC2, vert=True, positions=[positions[idx]], showmeans=False, showmedians=False, showextrema=False, widths=0.4)
+  # Customize appearance (colors, transparency, edge color)
+    for pc in parts_B['bodies']:
+      pc.set_facecolor(palette[6])  # Blue for PC1
+      pc.set_edgecolor('black')
+      pc.set_alpha(1)
+  ax2.set_ylabel(r'$\tau_2^{(i)} - \hat{\tau}_2^{(i, j)}$')
+  ax2_twin = ax2.twiny()
+  ax2_twin.scatter(modern_df['PC1'], modern_df['PC2'], alpha=0.1, s=1, c='grey')
+  ax2_twin.axes.get_xaxis().set_visible(False)
+  ax2_twin.axes.get_yaxis().set_visible(False)
+  
+  rates = [20, 50, 75, 90, 92, 93, 94, 95, 96, 97, 98, 99, 99.5]
+  # Customize plot aesthetics
+  ax2.set_xticks(positions, [rf'${{{rate}}}$' for rate in rates], rotation=45, ha='right')
+  ax2.set_xlabel(r'$r$ in $\%$')
+
+  plt.savefig(outfile)
